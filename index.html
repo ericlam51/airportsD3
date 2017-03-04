@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <script src="//code.jquery.com/jquery-2.0.0.js"></script>
+    <style>
+#map {
+    background-color: #fff;
+}
+.background {
+    fill: none;
+    pointer-events: all;
+}
+#countries {
+    fill: #cde;
+    stroke: #fff;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+#countries .active, #states .active {
+    fill: #89a;
+}
+
+.airport-arc {
+    fill: none;
+}
+
+.airport:hover .airport-arc {
+    stroke: #f00;
+}
+
+.airport-cell {
+    fill: none;
+    stroke: #000;
+    stroke-opacity: 0.1;
+    pointer-events: all;
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+    <script src="//d3js.org/d3.v4.min.js"></script>
+    <script src="//d3js.org/topojson.v1.min.js"></script>
+    <script src="https://d3js.org/d3-transition.v1.min.js"></script>
+    <script src="https://d3js.org/d3-drag.v1.min.js"></script>
+    <script src="https://d3js.org/d3-zoom.v1.min.js"></script>
+    <script src="https://d3js.org/d3-voronoi.v1.min.js"></script>
+    <script>
+        var width = Math.max(600, window.innerWidth),
+            height = Math.max(400, window.innerHeight),
+            rotate = 60,        // so that [-60, 0] becomes initial center of projection
+            maxlat = 83;        // clip northern and southern poles (infinite in mercator)
+
+        var projection = d3.geoEquirectangular()
+            .scale(1)
+            .translate([width / 2, height / 2]);
+
+        // find the top left and bottom right of current projection
+        function mercatorBounds(projection, maxlat) {
+            var yaw = projection.rotate()[0],
+                xymax = projection([-yaw+180-1e-6,-maxlat]),
+                xymin = projection([-yaw-180+1e-6, maxlat]);
+
+            return [xymin,xymax];
+        }
+
+        // set up the scale extent and initial scale for the projection
+        var b = mercatorBounds(projection, maxlat),
+            s = width/(b[1][0]-b[0][0]),
+            scaleExtent = [s, 10*s];
+
+        projection
+            .scale(scaleExtent[0]);
+
+        var voronoi = d3.voronoi()
+            .extent([[-1, -1], [width + 1, height + 1]]);
+
+        var zoom = d3.zoom()
+            .scaleExtent([1, 8])
+            .on("zoom", redraw);
+
+        var path = d3.geoPath()
+            .projection(projection);
+
+        var svg = d3.select('#map')
+            .append('svg')
+            .attr('width',width)
+            .attr('height',height)
+            .call(zoom);
+
+
+    var g = svg
+        .append("g");
+
+    d3.json("resources/shapefile/countries.topo.json", function(error, us) {
+        g.append("g")
+            .attr("id", "countries")
+            .selectAll("path")
+            .data(topojson.feature(us, us.objects.countries).features)
+            .enter()
+            .append("path")
+            .attr("id", function(d) { return d.id; })
+            .attr("d", path);
+    });
+
+    var segmentList = [
+        {
+            'iataFrom': 'YVR',
+            'iataTo': 'YUL',
+            'from': [-122.490402, 37.786453],
+            'to': [-73.5673, 45.5017],
+            'count': 12
+        },
+        {
+            'iataFrom': 'YUL',
+            'iataTo': 'YVR',
+            'to': [-122.490402, 37.786453],
+            'from': [-73.5673, 45.5017],
+            'count': 12
+        },
+        {
+            'iataFrom': 'YUL',
+            'iataTo': 'SEL',
+            'to': [21.7587, -4.0383],
+            'from': [-73.5673, 45.5017],
+            'count': 12
+        },
+        {
+            'iataFrom': 'SEL',
+            'iataTo': 'YUL',
+            'from': [21.7587, -4.0383],
+            'to': [-73.5673, 45.5017],
+            'count': 12
+        }
+    ];
+
+    var airports = [];
+
+    segmentList.forEach(function (segment) {
+        var d = {};
+        d[0] = segment.from[0];
+        d[1] = segment.from[1];
+        d.iata = segment.iataFrom;
+        d.arcs = {type: "MultiLineString", coordinates: []};
+        airports.push(d);
+
+        d = {};
+
+        d[0] = segment.to[0];
+        d[1] = segment.to[1];
+        d.iata = segment.iataTo;
+        d.arcs = {type: "MultiLineString", coordinates: []};
+        airports.push(d);
+    });
+
+    ready(airports, segmentList);
+
+    function ready(airports, flights) {
+        var airportByIata = d3.map(airports, function (d) {
+            return d.iata;
+        });
+
+        flights.forEach(function (flight) {
+            var source = airportByIata.get(flight.iataFrom);
+            target = airportByIata.get(flight.iataTo);
+
+            source.arcs.coordinates.push([source, target]);
+            target.arcs.coordinates.push([target, source]);
+        });
+
+        airports = airports
+            .filter(function (d) {
+                return d.arcs.coordinates.length;
+            });
+
+        svg.append("path")
+            .datum({type: "MultiPoint", coordinates: airports})
+            .attr("class", "airport-dots")
+            .attr("d", path);
+
+        var airport = svg.selectAll(".airport")
+            .data(airports)
+            .enter()
+            .append("g")
+            .attr("class", "airport");
+
+        airport.append("title")
+            .text(function (d) {
+                return d.iata + "\n" + d.arcs.coordinates.length + " flights";
+            });
+
+        airport.append("path")
+            .attr("class", "airport-arc")
+            .attr("d", function (d) {
+                return path(d.arcs);
+            });
+
+        airport.append("path")
+            .data(voronoi.polygons(airports.map(projection)))
+            .attr("class", "airport-cell")
+            .attr("d", function (d) {
+                return d ? "M" + d.join("L") + "Z" : null;
+            });
+    }
+
+    function redraw() {
+
+        var boundaries = mercatorBounds(projection, maxlat);
+
+        var t = d3.event.transform,
+            s = d3.event.transform.k;
+
+        t.x = Math.min(width * (s - 1), Math.max(width  * (1 - s), t.x));
+        t.y = Math.min(height / 2 * (s - 1) * s, Math.max(height / 2 * (1 - s) * s, t.y));
+
+        g.attr("transform", t);
+        svg.selectAll(".airport-dots")
+            .attr("d", path.projection(projection))
+            .attr("transform", d3.event.transform);
+
+        svg.selectAll(".airport-arc")
+            .attr("transform", d3.event.transform);
+
+        svg.selectAll(".airport-cell")
+            .attr("transform", d3.event.transform);
+
+    }
+
+</script>
+</body>
+</html>

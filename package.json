@@ -1,0 +1,15 @@
+{
+  "name": "worldmapd3",
+  "version": "1.0.0",
+  "description": "Sandbox for D3 world map",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Eric Lam",
+  "license": "ISC",
+  "dependencies": {
+    "d3-zoom": "^1.1.2",
+    "topojson": "^2.2.0"
+  }
+}
